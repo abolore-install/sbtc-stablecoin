@@ -97,3 +97,119 @@
         created-at: uint,
     }
 )
+
+(define-data-var vault-counter uint u0)
+
+;; ORACLE MANAGEMENT FUNCTIONS
+
+(define-public (add-btc-price-oracle (oracle principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (asserts!
+            (and
+                (not (is-eq oracle CONTRACT-OWNER))
+                (not (is-eq oracle tx-sender))
+            )
+            ERR-INVALID-PARAMETERS
+        )
+        (map-set btc-price-oracles oracle true)
+        (ok true)
+    )
+)
+
+(define-public (update-btc-price
+        (price uint)
+        (timestamp uint)
+    )
+    (begin
+        (asserts! (is-some (map-get? btc-price-oracles tx-sender))
+            ERR-NOT-AUTHORIZED
+        )
+        (asserts!
+            (and
+                (> price u0)
+                (<= price MAX-BTC-PRICE)
+            )
+            ERR-INVALID-PARAMETERS
+        )
+        (asserts! (<= timestamp MAX-TIMESTAMP) ERR-INVALID-PARAMETERS)
+        (map-set last-btc-price {
+            timestamp: timestamp,
+            price: price,
+        }
+            price
+        )
+        (ok true)
+    )
+)
+
+;; VAULT MANAGEMENT FUNCTIONS
+
+(define-public (create-vault (collateral-amount uint))
+    (let (
+            (vault-id (+ (var-get vault-counter) u1))
+            (new-vault {
+                owner: tx-sender,
+                id: vault-id,
+            })
+        )
+        (asserts! (> collateral-amount u0) ERR-INVALID-COLLATERAL)
+        (asserts! (< vault-id (+ (var-get vault-counter) u1000))
+            ERR-INVALID-PARAMETERS
+        )
+        (var-set vault-counter vault-id)
+        (map-set vaults new-vault {
+            collateral-amount: collateral-amount,
+            stablecoin-minted: u0,
+            created-at: stacks-block-height,
+        })
+        (ok vault-id)
+    )
+)
+
+(define-public (mint-stablecoin
+        (vault-owner principal)
+        (vault-id uint)
+        (mint-amount uint)
+    )
+    (let (
+            (is-valid-vault-id (and
+                (> vault-id u0)
+                (<= vault-id (var-get vault-counter))
+            ))
+            (vault (unwrap!
+                (map-get? vaults {
+                    owner: vault-owner,
+                    id: vault-id,
+                })
+                ERR-INVALID-PARAMETERS
+            ))
+            (btc-price (unwrap! (get-latest-btc-price) ERR-ORACLE-PRICE-UNAVAILABLE))
+            (max-mintable (/ (* (get collateral-amount vault) btc-price)
+                (var-get collateralization-ratio)
+            ))
+        )
+        (asserts! is-valid-vault-id ERR-INVALID-PARAMETERS)
+        (asserts! (is-eq tx-sender vault-owner) ERR-UNAUTHORIZED-VAULT-ACTION)
+        (asserts! (> mint-amount u0) ERR-INVALID-PARAMETERS)
+        (asserts! (>= max-mintable (+ (get stablecoin-minted vault) mint-amount))
+            ERR-UNDERCOLLATERALIZED
+        )
+        (asserts!
+            (<= (+ (get stablecoin-minted vault) mint-amount)
+                (var-get max-mint-limit)
+            )
+            ERR-MINT-LIMIT-EXCEEDED
+        )
+        (map-set vaults {
+            owner: vault-owner,
+            id: vault-id,
+        } {
+            collateral-amount: (get collateral-amount vault),
+            stablecoin-minted: (+ (get stablecoin-minted vault) mint-amount),
+            created-at: (get created-at vault),
+        })
+        (var-set total-supply (+ (var-get total-supply) mint-amount))
+        (ok true)
+    )
+)
