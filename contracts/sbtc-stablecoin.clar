@@ -308,3 +308,37 @@
         (ok true)
     )
 )
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-latest-btc-price)
+    (map-get? last-btc-price {
+        timestamp: stacks-block-height,
+        price: u0,
+    })
+)
+
+(define-read-only (get-vault-details
+        (vault-owner principal)
+        (vault-id uint)
+    )
+    (map-get? vaults {
+        owner: vault-owner,
+        id: vault-id,
+    })
+)
+
+(define-read-only (get-total-supply)
+    (var-get total-supply)
+)
+
+(define-read-only (get-protocol-info)
+    {
+        name: (var-get stablecoin-name),
+        symbol: (var-get stablecoin-symbol),
+        total-supply: (var-get total-supply),
+        collateralization-ratio: (var-get collateralization-ratio),
+        liquidation-threshold: (var-get liquidation-threshold),
+        vault-count: (var-get vault-counter),
+    }
+)
